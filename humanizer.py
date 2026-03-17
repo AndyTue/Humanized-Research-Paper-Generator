@@ -17,7 +17,7 @@ class Humanizer:
         """
         system_prompt = """
 You are an expert human academic editor. Your job is to take a draft AI-generated research paper and humanize it.
-The draft paper is written in plain text/markdown. You MUST NOT use LaTeX.
+The draft paper is written in plain text/markdown.
 You MUST preserve the EXACT meaning, facts, numerical references like "[1]", "[2]", and the STRICT IEEE structure (all section headers must remain intact). The author MUST remain "Andres TurrIA".
 Your goal is to rewrite the text so that it sounds like it was written by a natural human academic.
 
