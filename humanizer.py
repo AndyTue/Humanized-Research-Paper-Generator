@@ -2,22 +2,6 @@ import os
 import re
 from groq import Groq
 
-# ── IEEE section headers used to split the paper ────────────────────────────
-SECTION_PATTERNS = [
-    r"^#+\s*(title)",
-    r"^#+\s*(author)",
-    r"^#+\s*(abstract)",
-    r"^#+\s*(index terms)",
-    r"^#+\s*\d+[\.\)]\s*(introduction)",
-    r"^#+\s*\d+[\.\)]\s*(literature review|related work)",
-    r"^#+\s*\d+[\.\)]\s*(methodology|methods)",
-    r"^#+\s*\d+[\.\)]\s*(results)",
-    r"^#+\s*\d+[\.\)]\s*(discussion)",
-    r"^#+\s*\d+[\.\)]\s*(conclusion)",
-    r"^#+\s*(acknowledgment|acknowledgement)",
-    r"^#+\s*(references)",
-]
-
 # Sections that should NOT be paraphrased — preserve verbatim
 SKIP_SECTIONS = {"title", "author", "index terms", "references", "acknowledgment", "acknowledgement"}
 
@@ -75,73 +59,20 @@ def split_paper_into_sections(paper_text: str) -> list[dict]:
 # ── Per-section humanization prompts ────────────────────────────────────────
 
 SECTION_INSTRUCTIONS = {
-    "abstract": (
-        "Rewrite this Abstract so it reads like a human researcher summarising their own work. "
-        "Use natural academic phrasing. Vary sentence length — some short, some longer. "
-        "Avoid AI giveaways: no 'It is worth noting', 'Additionally', 'Furthermore' as openers. "
-        "Keep every inline citation exactly as-is (e.g., [1], [2])."
-    ),
-    "introduction": (
-        "Rewrite this Introduction as a human researcher would write it — with genuine curiosity "
-        "and motivation. Open with a concrete observation or question, not a definition. "
-        "Mix short punchy sentences with longer analytical ones (burstiness). "
-        "Use first-person plural ('We', 'Our') where natural for the field. "
-        "Preserve all inline citations exactly."
-    ),
-    "literature review": (
-        "Rewrite this Literature Review section to sound like a researcher who has genuinely read "
-        "these works and is offering their own synthesis. Use varied transitions: some contrasting "
-        "('Yet', 'In contrast'), some building ('Building on this'), some temporal ('Earlier work by'). "
-        "Avoid lists of author + year without commentary. Preserve all inline citations exactly."
-    ),
-    "related work": (
-        "Same as literature review instructions: synthesise, contrast, and connect ideas naturally. "
-        "Preserve all inline citations exactly."
-    ),
-    "methodology": (
-        "Rewrite this Methodology to sound like a researcher explaining their own design decisions. "
-        "Explain the 'why' behind choices, not just the 'what'. Use active voice where possible. "
-        "Vary sentence structure — avoid starting every sentence the same way. "
-        "Preserve all inline citations exactly."
-    ),
-    "methods": (
-        "Same as methodology: active voice, explain rationale, vary structure. "
-        "Preserve all inline citations exactly."
-    ),
-    "results": (
-        "Rewrite this Results section to sound like a researcher reporting what they found — "
-        "with a hint of genuine surprise or confirmation. Use precise language. "
-        "Mix sentences that state a result with sentences that contextualise it. "
-        "Preserve all inline citations and any numerical data exactly."
-    ),
-    "discussion": (
-        "Rewrite this Discussion so it feels like a researcher thinking aloud about their findings. "
-        "Include hedging language where appropriate ('This may suggest', 'One interpretation is'). "
-        "Engage critically with prior work. Use conversational academic prose — not robotic recitation. "
-        "Preserve all inline citations exactly."
-    ),
-    "conclusion": (
-        "Rewrite this Conclusion to feel like a researcher reflecting genuinely on what was achieved. "
-        "Avoid 'In conclusion' as the opening. Start with the most important takeaway. "
-        "Be honest about limitations. End with a forward-looking but grounded statement. "
-        "Preserve all inline citations exactly."
-    ),
-    "full_paper": (
-        "Rewrite this complete research paper so it sounds like it was written by a real human academic. "
-        "Apply these techniques throughout: (1) Vary sentence length deliberately — mix short impactful "
-        "sentences with longer analytical ones (burstiness). (2) Avoid AI openers like 'It is important "
-        "to note', 'Additionally', 'Moreover', 'Furthermore' at the start of paragraphs. "
-        "(3) Use first-person plural ('We', 'Our') where natural. (4) Add hedging and nuance in the "
-        "Discussion and Conclusion. (5) Use varied transition words. "
-        "PRESERVE: all section headers, author name 'Andres TurrIzA', all inline citations [N], "
-        "all numerical data, and the References list verbatim."
-    ),
+    "abstract": "Rewrite abstract like a human researcher. Use natural phrasing, varying sentence length. No AI giveaways. Preserve inline citations [N].",
+    "introduction": "Rewrite introduction with genuine curiosity. Mix sentence lengths. Use 'We'/'Our' if natural. Preserve citations.",
+    "literature review": "Synthesise prior works naturally. Use varied transitions ('Yet', 'Building on this'). Preserve citations.",
+    "related work": "Synthesise prior works naturally. Use varied transitions. Preserve citations.",
+    "methodology": "Explain the 'why' behind choices, not just 'what'. Use active voice, varied structure. Preserve citations.",
+    "methods": "Explain rationale, use active voice and varied structure. Preserve citations.",
+    "results": "Report findings precisely. Contextualise results. Preserve citations and numerical data exactly.",
+    "discussion": "Use hedging language ('This may suggest'). Engage critically. Conversational academic prose. Preserve citations.",
+    "conclusion": "Reflect on achievements. Avoid 'In conclusion'. State main takeaway and limitations. Preserve citations.",
+    "full_paper": "Rewrite paper naturally. Vary sentence length. Keep citations, data, and section headers exactly.",
 }
 
 GENERIC_INSTRUCTION = (
-    "Rewrite this academic section to sound like a human researcher wrote it. "
-    "Vary sentence length (burstiness). Use natural academic voice. "
-    "Avoid AI clichés. Preserve all inline citations exactly."
+    "Rewrite to sound human. Vary sentence length. Preserve all citations exactly."
 )
 
 
@@ -170,21 +101,18 @@ class Humanizer:
         instruction = _get_instruction(label)
 
         system_prompt = f"""
-You are an expert human academic editor specialising in making AI-generated text indistinguishable from human-written academic prose.
+You are an expert human academic editor formatting text to be indistinguishable from human-written prose.
+Rules:
+1. High burstiness (mix short 5-10 word and long 25-40 word sentences).
+2. Use precise, less predictable academic vocabulary.
+3. NEVER start paragraphs with "Additionally", "Furthermore", "In conclusion".
+4. PRESERVE ALL inline citations (e.g., [1]) EXACTLY as they appear.
+5. NO preamble. RETURN ONLY rewritten text.
 
-Your rewriting technique:
-- HIGH BURSTINESS: deliberately alternate between short sentences (5–10 words) and long analytical sentences (25–40 words).
-- HIGH PERPLEXITY: choose less predictable word choices — prefer precise academic vocabulary over generic terms.
-- REMOVE AI TELLS: never start a paragraph with "Additionally", "Furthermore", "Moreover", "It is important to note", "It is worth noting", "In conclusion".
-- PRESERVE CITATIONS: every inline citation [1], [2], etc. MUST appear in the rewritten text in the same position.
-- PRESERVE STRUCTURE: do not add or remove section headers. Do not change the author name.
-- OUTPUT: return ONLY the rewritten body text, with no preamble or explanation.
-
-SECTION-SPECIFIC INSTRUCTION:
-{instruction}
+Section Instructions: {instruction}
 """
 
-        user_prompt = f"SECTION TO REWRITE:\n\n{body.strip()}"
+        user_prompt = f"Rewrite this:\n\n{body.strip()}"
 
         try:
             response = self.client.chat.completions.create(
@@ -194,7 +122,7 @@ SECTION-SPECIFIC INSTRUCTION:
                 ],
                 model=self.model,
                 temperature=0.65,
-                max_tokens=4000,
+                max_tokens=1500,
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
