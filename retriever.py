@@ -1,6 +1,12 @@
 import wikipedia
 from vector_store import VectorStore
 from embeddings import EmbeddingsModel
+from token_utils import count_tokens, truncate_to_tokens
+
+# ── Token budget constants ──────────────────────────────────────────────────
+CONTEXT_TOKEN_BUDGET = 23500   # Total budget for combined context
+FAISS_BUDGET_RATIO = 0.6       # 60 % of budget for FAISS chunks
+WIKI_BUDGET_RATIO = 0.4        # 40 % of budget for Wikipedia
 
 class Retriever:
     def __init__(self, vector_store: VectorStore, embeddings_model: EmbeddingsModel):
@@ -36,9 +42,8 @@ class Retriever:
             search_results = wikipedia.search(query, results=1)
             if search_results:
                 page_title = search_results[0]
-                page = wikipedia.page(page_title, auto_suggest=False)
-                # Get a summary or full text. We use summary with high sentences for better context.
-                # If page is too large, we might want to just get the summary or truncate to 2000 chars
+                # Get a summary (the old wikipedia.page() call was removed —
+                # it downloaded the full article but was never used).
                 summary = wikipedia.summary(page_title, sentences=sentences, auto_suggest=False)
                 context = f"[Source: Wikipedia - {page_title}]\n{summary}"
             else:
@@ -59,9 +64,19 @@ class Retriever:
     def retrieve(self, query, top_k=5, wiki_sentences=10):
         """
         Retrieves formatted context from both FAISS and Wikipedia.
+        Enforces a hard token budget split 60/40 between FAISS and Wikipedia.
         """
         faiss_context = self.get_faiss_context(query, top_k)
         wiki_context = self.get_wikipedia_context(query, wiki_sentences)
+
+        # ── Token budgeting ─────────────────────────────────────────────
+        faiss_budget = int(CONTEXT_TOKEN_BUDGET * FAISS_BUDGET_RATIO)
+        wiki_budget = int(CONTEXT_TOKEN_BUDGET * WIKI_BUDGET_RATIO)
+
+        if count_tokens(faiss_context) > faiss_budget:
+            faiss_context = truncate_to_tokens(faiss_context, faiss_budget)
+        if count_tokens(wiki_context) > wiki_budget:
+            wiki_context = truncate_to_tokens(wiki_context, wiki_budget)
         
         combined_context = f"=== USER DOCUMENTS CONTEXT ===\n{faiss_context}\n\n"
         combined_context += f"=== WIKIPEDIA CONTEXT ===\n{wiki_context}"

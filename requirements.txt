@@ -6,3 +6,4 @@ pypdf
 python-docx
 wikipedia
 python-dotenv
+tiktoken

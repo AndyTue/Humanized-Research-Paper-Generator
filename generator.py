@@ -1,5 +1,10 @@
 import os
 from groq import Groq
+from token_utils import count_tokens, truncate_to_tokens
+
+# ── Token-limit constants ───────────────────────────────────────────────────
+MODEL_TOKEN_LIMIT = 32768
+SAFETY_MARGIN = 500
 
 REQUIRED_SECTIONS = [
     "abstract",
@@ -87,30 +92,72 @@ Do NOT produce a shortened or outline-style version — write the full paper.
             base += f"\n\nNOTE FROM PREVIOUS ATTEMPT — YOU MUST FIX THIS: {extra_note}"
         return base
 
+    def _enforce_input_limit(self, context: str, system_prompt: str, user_prompt_template: str) -> str:
+        """
+        If total input tokens exceed the safe ceiling, truncate the *context*
+        portion of the user prompt so the call stays within limits.
+        Returns the (possibly truncated) context string.
+        """
+        safe_input_limit = MODEL_TOKEN_LIMIT - self.max_tokens - SAFETY_MARGIN
+        overhead_tokens = count_tokens(system_prompt) + count_tokens(user_prompt_template)
+        context_budget = safe_input_limit - overhead_tokens
+        if context_budget < 0:
+            context_budget = 500  # absolute minimum fallback
+
+        if count_tokens(context) > context_budget:
+            context = truncate_to_tokens(context, context_budget)
+        return context
+
     def generate_ieee_paper(self, query: str, context: str, max_retries: int = 3) -> str:
         """
         Generates an IEEE paper. Validates structure AND word count.
         Retries up to max_retries if validation fails.
+        Uses multi-turn messages on retries to avoid resending the full context.
         """
         system_prompt = self._build_system_prompt()
         extra_note = ""
+        previous_draft = None
 
         for attempt in range(max_retries + 1):
             print(f"   Generation attempt {attempt + 1}/{max_retries + 1}...")
             try:
-                user_prompt = self._build_user_prompt(query, context, extra_note)
+                if attempt == 0:
+                    # ── First attempt: full prompt with context ──────────
+                    # Enforce input token limit on context
+                    user_prompt_shell = self._build_user_prompt(query, "", extra_note)
+                    safe_context = self._enforce_input_limit(
+                        context, system_prompt, user_prompt_shell
+                    )
+                    user_prompt = self._build_user_prompt(query, safe_context, extra_note)
 
-                response = self.client.chat.completions.create(
-                    messages=[
+                    messages = [
                         {"role": "system", "content": system_prompt},
                         {"role": "user",   "content": user_prompt},
-                    ],
+                    ]
+                else:
+                    # ── Retry: multi-turn — include previous draft as
+                    #    assistant turn, send only the correction note.
+                    #    Context is already in the conversation history.
+                    correction = (
+                        f"Your previous draft did NOT pass validation. "
+                        f"Fix the following issues and return the COMPLETE revised paper:\n{extra_note}"
+                    )
+                    messages = [
+                        {"role": "system",    "content": system_prompt},
+                        {"role": "user",      "content": user_prompt},       # original prompt (already in history)
+                        {"role": "assistant", "content": previous_draft},     # model's last output
+                        {"role": "user",      "content": correction},         # short correction only
+                    ]
+
+                response = self.client.chat.completions.create(
+                    messages=messages,
                     model=self.model,
                     temperature=0.7,
                     max_tokens=self.max_tokens,
                 )
 
                 paper = response.choices[0].message.content
+                previous_draft = paper
                 is_valid, missing_sections, word_count = validate_ieee_structure(paper)
 
                 print(f"   -> Word count: {word_count} | Missing sections: {missing_sections}")

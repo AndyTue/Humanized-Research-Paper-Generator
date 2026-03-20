@@ -1,6 +1,11 @@
 import os
 import re
 from groq import Groq
+from token_utils import count_tokens, truncate_to_tokens
+
+# ── Token floor / ceiling for per-section humanization ──────────────────────
+MIN_SECTION_TOKENS = 40      # skip sections smaller than this
+MAX_SECTION_INPUT_TOKENS = 1200   # truncate sections larger than this
 
 # Sections that should NOT be paraphrased — preserve verbatim
 SKIP_SECTIONS = {"title", "author", "index terms", "references", "acknowledgment", "acknowledgement"}
@@ -121,7 +126,7 @@ Section Instructions: {instruction}
                     {"role": "user",   "content": user_prompt},
                 ],
                 model=self.model,
-                temperature=0.65,
+                temperature=0.85,
                 max_tokens=1500,
             )
             return response.choices[0].message.content.strip()
@@ -166,12 +171,18 @@ Section Instructions: {instruction}
                 continue
 
             # Skip sections with very little content (likely just a label line)
-            if len(body.strip()) < 80:
-                print(f"   Skipping thin section (too short to rewrite): '{label}'")
+            body_tokens = count_tokens(body.strip())
+            if body_tokens < MIN_SECTION_TOKENS:
+                print(f"   Skipping thin section ({body_tokens} tokens, min {MIN_SECTION_TOKENS}): '{label}'")
                 rebuilt_parts.append(body.rstrip())
                 continue
 
-            print(f"   Humanizing section {i + 1}/{len(sections)}: '{label}' ({len(body.split())} words)...")
+            # Truncate oversized sections to avoid exceeding output token limit
+            if body_tokens > MAX_SECTION_INPUT_TOKENS:
+                print(f"   Truncating oversized section '{label}' from {body_tokens} to {MAX_SECTION_INPUT_TOKENS} tokens")
+                body = truncate_to_tokens(body, MAX_SECTION_INPUT_TOKENS)
+
+            print(f"   Humanizing section {i + 1}/{len(sections)}: '{label}' ({count_tokens(body)} tokens)...")
             humanized_body = self._humanize_section(header, body, label)
             rebuilt_parts.append("\n" + humanized_body + "\n")
 
