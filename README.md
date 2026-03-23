@@ -318,7 +318,7 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 
 <div align="center">
 
-**Built with ❤️ by [Andres TurrIzA](https://github.com/AndyTue)**
+**Built with ❤️ by [Andrés Turriza](https://github.com/AndyTue)**
 
 _Powered by open-source AI — LLaMA 3.3, FAISS, SentenceTransformers, and Gradio_
 
